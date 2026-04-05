@@ -4,6 +4,7 @@
   "description": "Node.js orchestration service for an enterprise RAG proof-of-concept integrating Qdrant vector retrieval with a ROCm-accelerated vLLM inference backend.",
   "main": "index.js",
   "scripts": {
+    "build": "tsc",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
@@ -36,5 +37,10 @@
     "@langchain/qdrant": "^1.0.1",
     "@xenova/transformers": "^2.17.2",
     "uuid": "^13.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.2",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2"
   }
 }
