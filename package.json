@@ -1,0 +1,40 @@
+{
+  "name": "rag-poc",
+  "version": "0.1.0",
+  "description": "Node.js orchestration service for an enterprise RAG proof-of-concept integrating Qdrant vector retrieval with a ROCm-accelerated vLLM inference backend.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/teleoric/rag-poc.git"
+  },
+  "keywords": [
+    "rag",
+    "vllm",
+    "rocm",
+    "qdrant",
+    "llm",
+    "vector-search",
+    "inference",
+    "llama3",
+    "langchain",
+    "ai",
+    "poc"
+  ],
+  "author": "Gary Rancier",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/teleoric/rag-poc/issues"
+  },
+  "homepage": "https://github.com/teleoric/rag-poc#readme",
+  "dependencies": {
+    "@langchain/community": "^1.1.27",
+    "@langchain/core": "^1.1.39",
+    "@langchain/openai": "^1.4.2",
+    "@langchain/qdrant": "^1.0.1",
+    "@xenova/transformers": "^2.17.2",
+    "uuid": "^13.0.0"
+  }
+}

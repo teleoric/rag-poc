@@ -1,0 +1,44 @@
+# Node & TypeScript
+node_modules/
+dist/
+build/
+.env
+
+# Vector Store Storage
+qdrant_storage/
+
+# Downloaded Models / Cache
+.cache/
+models/
+huggingface/
+*.bin
+*.gguf
+*.safetensors
+*.pt
+*.pth
+
+# vLLM / Python Artifacts (if any local scripting remains)
+__pycache__/
+*.pyc
+.pytest_cache/
+venv/
+.venv/
+env/
+
+# Data Ingestion Sources
+data/
+documents/
+*.pdf
+*.docx
+*.csv
+
+# Logs & Metrics
+logs/
+*.log
+prometheus/
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+
