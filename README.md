@@ -1,320 +1,150 @@
-# Enterprise RAG POC: ROCm 7900 XT + vLLM + Qdrant
+# Enterprise RAG POC — ROCm RX 7900 XT + vLLM + Qdrant
 
-End-to-end setup guide for deploying a local Retrieval-Augmented Generation (RAG) pipeline on a consumer AMD Radeon RX 7900 XT (RDNA3/`gfx1100`). 
+End-to-end Retrieval-Augmented Generation pipeline running locally on a
+consumer AMD Radeon RX 7900 XT (RDNA3 / `gfx1100`).
 
-This architecture isolates stateful vector storage (Qdrant) and inference computation (vLLM) in separate containers, utilizing a Node.js/TypeScript orchestrator with local CPU-bound ONNX embeddings to prevent GPU VRAM exhaustion.
+The architecture isolates the three stateful concerns:
 
-## Phase 1: Host OS Preparation
+| Component | Role | Process |
+|---|---|---|
+| **vLLM** | LLM inference (Llama-3.1-8B-Instruct) | Long-running `vllm serve` on `:8000` |
+| **Qdrant** | Vector store | Docker container on `:6333` |
+| **Node orchestrator** | Chunking, embeddings, retrieval, prompting | `tsx src/ragPipeline.ts` |
 
-Assume a fresh Ubuntu LTS install. You must install the AMD proprietary drivers and ROCm stack to expose `/dev/kfd` and `/dev/dri` to the containers.
+Embeddings (`Xenova/all-MiniLM-L6-v2`) run on CPU via ONNX so the GPU's
+24 GB of VRAM stays dedicated to the LLM + KV cache.
 
-```bash
-# 1. System Update
-sudo apt-get update && sudo apt-get upgrade -y
-sudo apt-get install -y wget curl git build-essential python3-pip python3-venv nodejs npm
+---
 
-# 2. Install AMD GPU Drivers & ROCm
-wget https://repo.radeon.com/amdgpu-install/6.0.2/ubuntu/jammy/amdgpu-install_6.0.60002-1_all.deb
-sudo apt-get install -y ./amdgpu-install_6.0.60002-1_all.deb
-sudo amdgpu-install --usecase=graphics,rocm --no-dkms -y
+## Prerequisites
 
-# 3. Add user to render/video groups for GPU access
-sudo usermod -aG render,video $USER
-```
-*Reboot the machine after driver installation to load the kernel modules.*
+1. **ROCm 7.2** installed on the host with `gfx1100` exposed:
+   ```bash
+   cat /opt/rocm/.info/version   # 7.2.x
+   rocminfo | grep gfx           # gfx1100
+   ```
+2. **Hugging Face token** with access to `meta-llama/Llama-3.1-8B-Instruct`:
+   ```bash
+   export HF_TOKEN="hf_..."
+   ```
+3. **Node 22+** and **Docker**.
 
-## Phase 2: Docker Engine Installation
+> Building vLLM 0.19.0 against ROCm 7.2 for RDNA3 is non-trivial. The full
+> bare-metal install — including `--no-build-isolation`, `amdsmi`, GEMM
+> tuning, and the RDNA3 limitations — lives in **[vllm-setup.md](vllm-setup.md)**.
+> Follow it once before continuing.
 
-Do not use the Ubuntu snap package for Docker; it causes permission issues with GPU device mounting. Use the official Docker repository.
+---
 
-```bash
-# 1. Add Docker's official GPG key
-sudo apt-get update
-sudo apt-get install -y ca-certificates curl
-sudo install -m 0755 -d /etc/apt/keyrings
-sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-sudo chmod a+r /etc/apt/keyrings/docker.asc
+## Run order
 
-# 2. Add the repository to Apt sources
-echo \
-  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
-  $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
-  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-sudo apt-get update
-
-# 3. Install Docker Engine
-sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-
-# 4. Configure non-root Docker access
-sudo usermod -aG docker $USER
-newgrp docker
-```
-
-## Phase 3: Hugging Face Authentication
-
-Llama-3-8B is a gated model. You need a Hugging Face token to download the `.safetensors` weights.
-
-1. Go to [Hugging Face](https://huggingface.co/) and create an account.
-2. Navigate to the [Meta-Llama-3-8B-Instruct repository](https://huggingface.co/meta-llama/Meta-Llama-3-8B-Instruct) and accept the license agreement.
-3. Go to **Settings > Access Tokens** and create a token with `Read` permissions.
-
-Export this locally (or add to `~/.bashrc`):
-```bash
-export HF_TOKEN="hf_your_actual_token_here"
-```
-
-## Phase 4: Compiling vLLM for RDNA3 (gfx1100)
-
-Pre-compiled vLLM ROCm wheels target enterprise CDNA architectures (MI250/MI300). Using them on a 7900 XT forces a fallback to Triton-compiled Python attention kernels, severely degrading batching throughput. You must compile the C++ PagedAttention kernels from source targeting `gfx1100`.
+The three services compete for the GPU. Start them in this order:
 
 ```bash
-# Clone the vLLM repository
-git clone https://github.com/vllm-project/vllm.git
-cd vllm
+# 1. Validate the vLLM build (in-process, releases the GPU on exit)
+python scripts/bench/smoke_opt125m.py
+python scripts/bench/smoke_llama3_8b.py
 
-# Build the custom image (This will take 30-60 minutes)
-docker build -f docker/Dockerfile.rocm \
-  --build-arg PYTORCH_ROCM_ARCH="gfx1100" \
-  --build-arg MAX_JOBS=$(nproc) \
-  -t vllm-rocm-gfx1100 .
-  
-cd ..
-```
-
-## Phase 5: Inference Validation
-
-Before standing up the API server, validate the compiled kernels and GPU multiprocessing context using a standalone test script. 
-
-Create `test-vllm.py`:
-```python
-from vllm import LLM
-
-def main():
-    # enforce_eager=True prevents CUDA graph capture issues on consumer GPUs during initialization
-    llm = LLM(
-        model="meta-llama/Meta-Llama-3-8B-Instruct", 
-        enforce_eager=True, 
-        gpu_memory_utilization=0.90,
-        max_model_len=4096
-    )
-    output = llm.generate("The architectural difference between a reverse proxy and an API gateway is")
-    for request_output in output:
-        print(request_output.outputs[0].text)
-
-# CRITICAL: vLLM on ROCm requires the 'spawn' multiprocessing context. 
-# The main execution guard prevents recursive initialization deadlocks.
-if __name__ == "__main__":
-    main()
-```
-
-Run the validation inside the custom container:
-```bash
-docker run --rm -it \
-  --network=host --device=/dev/kfd --device=/dev/dri \
-  --group-add=video --ipc=host --cap-add=SYS_PTRACE \
-  --security-opt seccomp=unconfined \
-  -e HF_TOKEN=$HF_TOKEN \
-  -v ~/.cache/huggingface:/root/.cache/huggingface \
-  -v $(pwd):/workspace \
-  -w /workspace \
-  vllm-rocm-gfx1100 \
-  python3 test-vllm.py
-```
-*Expected: The script downloads weights (or loads from cache), initializes the KV cache, and prints the generated completion without Triton fallback warnings.*
-
-## Phase 6: Infrastructure Deployment
-
-Launch the long-running services.
-
-**1. Qdrant Vector Store**
-```bash
+# 2. Start Qdrant (long-running)
 docker run -d --name qdrant-poc -p 6333:6333 -p 6334:6334 \
     -v $(pwd)/qdrant_storage:/qdrant/storage \
     qdrant/qdrant
+
+# 3. Start vLLM API server (long-running)
+source ~/vllm-env.sh
+vllm serve meta-llama/Llama-3.1-8B-Instruct \
+    --dtype float16 \
+    --enforce-eager \
+    --gpu-memory-utilization 0.92 \
+    --max-model-len 4096 \
+    --max-num-seqs 4
+# Wait for "Uvicorn running on http://0.0.0.0:8000" before continuing.
+
+# 4. Run the RAG pipeline
+npm install
+npm start
 ```
 
-**2. vLLM API Server**
-```bash
-docker run -d --name vllm-poc --network=host --device=/dev/kfd --device=/dev/dri \
-  --group-add=video --ipc=host --cap-add=SYS_PTRACE \
-  --security-opt seccomp=unconfined \
-  -e HF_TOKEN=$HF_TOKEN \
-  -v ~/.cache/huggingface:/root/.cache/huggingface \
-  vllm-rocm-gfx1100 \
-  --model meta-llama/Meta-Llama-3-8B-Instruct \
-  --gpu-memory-utilization 0.90 \
-  --max-model-len 4096 \
-  --port 8000
+A `Makefile` wraps each step (`make smoke`, `make qdrant`, `make vllm`,
+`make rag`).
+
+---
+
+## Configuration
+
+`src/ragPipeline.ts` reads all knobs from the environment with sensible
+defaults — no code edits required to retarget.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `VLLM_ENDPOINT` | `http://127.0.0.1:8000/v1` | OpenAI-compatible vLLM URL |
+| `VLLM_API_KEY` | `EMPTY` | Required by the SDK; vLLM ignores it |
+| `QDRANT_URL` | `http://127.0.0.1:6333` | Qdrant REST endpoint |
+| `QDRANT_COLLECTION` | `saas_docs` | Collection name |
+| `LLM_MODEL` | `meta-llama/Llama-3.1-8B-Instruct` | Must match the served model id |
+| `EMBEDDING_MODEL` | `Xenova/all-MiniLM-L6-v2` | 384-d, 256-token ONNX model |
+| `RAG_TOP_K` | `5` | Chunks to retrieve per query |
+| `RAG_CHUNK_SIZE` | `512` | Characters per chunk |
+| `RAG_CHUNK_OVERLAP` | `64` | Character overlap between chunks |
+| `RAG_TEMPERATURE` | `0` | Deterministic by default for grounded answers |
+
+---
+
+## Pipeline behavior
+
+- **Chunking.** Inputs are passed through `RecursiveCharacterTextSplitter`
+  before embedding, so documents longer than the embedding model's
+  256-token window are not silently truncated.
+- **Stable point IDs.** Each chunk's Qdrant ID is a UUIDv5 derived from
+  `(source, chunk-text)`. Re-ingesting the same content upserts in place
+  instead of duplicating, so the script is safe to re-run.
+- **Chat templating.** The prompt is sent as OpenAI-style `messages`;
+  vLLM applies the Llama-3.1 chat template server-side. Do **not**
+  re-introduce raw `<|begin_of_text|>` tokens into the prompt — that
+  produces double-templated input.
+- **Batched embeddings.** All chunks in an ingest call share a single
+  forward pass through the ONNX extractor.
+- **Grounded prompting.** The system prompt forbids outside knowledge and
+  asks the model to say so when the context is insufficient.
+
+---
+
+## Project layout
+
 ```
-*Note: Tail the logs (`docker logs -f vllm-poc`) to ensure the Uvicorn server starts successfully (takes ~20-30s) before executing the orchestrator.*
-
-## Phase 7: Node.js Orchestrator (RAG Pipeline)
-
-Initialize the TypeScript project and install dependencies.
-
-```bash
-mkdir rag-poc && cd rag-poc
-npm init -y
-npm install @langchain/core @langchain/openai @langchain/qdrant @langchain/community @xenova/transformers uuid
-npm install -D typescript @types/node @types/uuid tsx
-npx tsc --init
-```
-
-Create `ragPipeline.ts`:
-
-```typescript
-import { ChatOpenAI } from "@langchain/openai";
-import { QdrantVectorStore } from "@langchain/qdrant";
-import { Embeddings } from "@langchain/core/embeddings";
-import { Document } from "@langchain/core/documents";
-import { StringOutputParser } from "@langchain/core/output_parsers";
-import { PromptTemplate } from "@langchain/core/prompts";
-import { pipeline } from "@xenova/transformers";
-import { v4 as uuidv4 } from "uuid";
-
-// 1. CPU-Bound ONNX Embeddings (Preserves 7900 XT VRAM for LLM)
-class LocalTransformersEmbeddings extends Embeddings {
-  private extractor: any;
-  private modelName: string;
-
-  constructor(modelName: string = "Xenova/all-MiniLM-L6-v2") {
-    super({});
-    this.modelName = modelName;
-  }
-
-  private async getExtractor() {
-    if (!this.extractor) {
-      this.extractor = await pipeline("feature-extraction", this.modelName);
-    }
-    return this.extractor;
-  }
-
-  async embedDocuments(documents: string[]): Promise<number[][]> {
-    const extractor = await this.getExtractor();
-    const embeddings: number[][] = [];
-    
-    for (const doc of documents) {
-      const output = await extractor(doc, { pooling: "mean", normalize: true });
-      embeddings.push(Array.from(output.data));
-    }
-    return embeddings;
-  }
-
-  async embedQuery(document: string): Promise<number[]> {
-    const extractor = await this.getExtractor();
-    const output = await extractor(document, { pooling: "mean", normalize: true });
-    return Array.from(output.data);
-  }
-}
-
-// 2. Main RAG Class
-export class EnterpriseRAG {
-  private llm: ChatOpenAI;
-  private embeddings: LocalTransformersEmbeddings;
-  private qdrantUrl: string;
-  private collectionName: string;
-
-  constructor(vllmEndpoint: string, qdrantUrl: string, collectionName: string) {
-    this.embeddings = new LocalTransformersEmbeddings();
-    this.qdrantUrl = qdrantUrl;
-    this.collectionName = collectionName;
-
-    this.llm = new ChatOpenAI({
-      apiKey: "EMPTY", // Required by SDK schema, ignored by vLLM
-      configuration: {
-        baseURL: vllmEndpoint,
-      },
-      modelName: "meta-llama/Meta-Llama-3-8B-Instruct",
-      temperature: 0.1,
-    });
-  }
-
-  public async ingestDocuments(texts: string[], metadatas: object[]): Promise<void> {
-    const docs = texts.map((text, index) => {
-      return new Document({
-        pageContent: text,
-        metadata: { ...metadatas[index], id: uuidv4() },
-      });
-    });
-
-    await QdrantVectorStore.fromDocuments(docs, this.embeddings, {
-      url: this.qdrantUrl,
-      collectionName: this.collectionName,
-    });
-    
-    console.log(`Ingested ${docs.length} documents into Qdrant.`);
-  }
-
-  public async query(question: string): Promise<string> {
-    const vectorStore = await QdrantVectorStore.fromExistingCollection(this.embeddings, {
-      url: this.qdrantUrl,
-      collectionName: this.collectionName,
-    });
-
-    const retriever = vectorStore.asRetriever(3);
-    const retrievedDocs = await retriever.invoke(question);
-
-    if (retrievedDocs.length === 0) {
-      return "No relevant context found in the knowledge base.";
-    }
-
-    let context = "";
-    for (const doc of retrievedDocs) {
-      context += `${doc.pageContent}\n\n`;
-    }
-
-    // Strict prompt to prevent knowledge bleed
-    const prompt = PromptTemplate.fromTemplate(`
-      <|begin_of_text|><|start_header_id|>system<|end_header_id|>
-      You are an expert technical assistant. Use the following context to answer the user's question. 
-      Do not utilize outside knowledge. If the context does not explain the mechanism, state that explicitly.
-      
-      Context:
-      {context}
-      <|eot_id|><|start_header_id|>user<|end_header_id|>
-      {question}
-      <|eot_id|><|start_header_id|>assistant<|end_header_id|>
-    `);
-
-    const chain = prompt.pipe(this.llm).pipe(new StringOutputParser());
-
-    try {
-      return await chain.invoke({ context, question });
-    } catch (error) {
-      console.error("Inference failed", error);
-      throw error;
-    }
-  }
-}
-
-// 3. Execution
-async function runPoc() {
-  const rag = new EnterpriseRAG("http://127.0.0.1:8000/v1", "http://127.0.0.1:6333", "saas_docs");
-
-  const sampleDocs = [
-    "The new API Gateway handles rate limiting via Redis, enforcing a 100 req/sec limit per tenant.",
-    "Tenant isolation in the database is handled via row-level security (RLS) policies in PostgreSQL.",
-  ];
-  const metadatas = [{ source: "arch-doc" }, { source: "db-doc" }];
-
-  console.log("Ingesting...");
-  await rag.ingestDocuments(sampleDocs, metadatas);
-
-  console.log("Querying...");
-  const answer = await rag.query("How is tenant data isolated?");
-  console.log(`\nAnswer:\n${answer}`);
-}
-
-if (require.main === module) {
-  runPoc().catch((err) => {
-    console.error(err);
-    process.exit(1);
-  });
-}
+.
+├── src/
+│   └── ragPipeline.ts          # The orchestrator: embeddings + retrieval + prompting
+├── scripts/
+│   └── bench/
+│       ├── smoke_opt125m.py            # First-run sanity check
+│       ├── smoke_llama3_8b.py          # Full-precision Llama load test
+│       └── bench_llama31_awq_int4.py   # Batched AWQ-INT4 throughput probe
+├── vllm-setup.md                # Canonical vLLM/ROCm install guide
+├── Makefile                     # Run-order wrapper
+├── tsconfig.json
+└── package.json
 ```
 
-Execute the pipeline:
-```bash
-npx tsx ragPipeline.ts
-```
+---
 
+## RDNA3 caveats (short version)
+
+- No FP8, no CK FlashAttention, no hipBLASLt — see vllm-setup.md for the
+  full table and workarounds (GPTQ/AWQ, TunableOp).
+- 24 GB VRAM ceiling: Llama-3.1-8B fp16 leaves only ~2-3 GiB for KV cache,
+  capping concurrency around 5x at 4 k context. AWQ-INT4 buys headroom.
+- `--enforce-eager` is on by default for stability; drop it once your
+  build is proven to recover CUDA-graph throughput.
+
+---
+
+## What this POC does **not** do
+
+- **No eval harness.** Faithfulness, recall@k, and grounded-vs-hallucinated
+  measurement are not implemented. Treat this as a plumbing demo, not a
+  quality benchmark.
+- **No re-ranking.** Top-k chunks go straight into the prompt.
+- **No auth on vLLM.** `--port 8000` is exposed on every interface when
+  you use `--network=host`. Acceptable on a workstation; not for shared
+  hosts.

@@ -2,9 +2,12 @@
   "name": "rag-poc",
   "version": "0.1.0",
   "description": "Node.js orchestration service for an enterprise RAG proof-of-concept integrating Qdrant vector retrieval with a ROCm-accelerated vLLM inference backend.",
-  "main": "index.js",
+  "type": "module",
+  "main": "dist/ragPipeline.js",
   "scripts": {
     "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "start": "tsx src/ragPipeline.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
@@ -35,6 +38,7 @@
     "@langchain/core": "^1.1.39",
     "@langchain/openai": "^1.4.2",
     "@langchain/qdrant": "^1.0.1",
+    "@langchain/textsplitters": "^1.0.1",
     "@xenova/transformers": "^2.17.2",
     "uuid": "^13.0.0"
   },
