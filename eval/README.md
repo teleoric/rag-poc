@@ -69,7 +69,36 @@ Thresholds are in [runEval.ts](runEval.ts) — `FAITHFULNESS_PASS`, etc.
 | `EVAL_COLLECTION` | `eval_corpus` | Qdrant collection name for this run. Wiped at start. |
 | `JUDGE_ENDPOINT` | `$VLLM_ENDPOINT` | Separate judge endpoint (e.g. a stronger model). |
 | `JUDGE_MODEL` | `$LLM_MODEL` | Judge model id. |
+| `JUDGE_API_KEY` | `$VLLM_API_KEY` → `"EMPTY"` | Auth for the judge endpoint. Required for OpenAI / Anthropic / Gemini / OpenRouter; ignored by local vLLM. |
 | `EVAL_VERBOSE` | unset | Log judge parse failures with the raw response. |
+
+### External judge examples
+
+```bash
+# OpenAI
+JUDGE_ENDPOINT=https://api.openai.com/v1 \
+JUDGE_MODEL=gpt-4o-mini \
+JUDGE_API_KEY=sk-proj-... \
+  make eval
+
+# Anthropic (OpenAI-compat layer)
+JUDGE_ENDPOINT=https://api.anthropic.com/v1 \
+JUDGE_MODEL=claude-haiku-4-5-20251001 \
+JUDGE_API_KEY=sk-ant-api03-... \
+  make eval
+
+# Google AI Studio
+JUDGE_ENDPOINT=https://generativelanguage.googleapis.com/v1beta/openai \
+JUDGE_MODEL=gemini-2.5-flash \
+JUDGE_API_KEY=AIzaSy... \
+  make eval
+
+# OpenRouter (any model via one key)
+JUDGE_ENDPOINT=https://openrouter.ai/api/v1 \
+JUDGE_MODEL=anthropic/claude-sonnet-4-6 \
+JUDGE_API_KEY=sk-or-v1-... \
+  make eval
+```
 
 Plus everything else `ragPipeline.ts` honors (`VLLM_ENDPOINT`, `LLM_MODEL`,
 `EMBEDDING_MODEL`, `RAG_TOP_K`, etc.).

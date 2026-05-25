@@ -42,16 +42,20 @@ const ABSTAIN_MARKERS = ["not supported by available context", "no relevant cont
 interface RunConfig extends RagConfig {
   judgeEndpoint: string;
   judgeModel: string;
+  judgeApiKey: string;
 }
 
 function loadRunConfig(): RunConfig {
   const base = loadRagConfig();
+  // For external judges (OpenAI, Anthropic, Gemini, OpenRouter, …) JUDGE_API_KEY
+  // is required. For a local vLLM judge it doesn't matter — vLLM ignores the
+  // header but the SDK requires a non-empty string, so we fall back to "EMPTY".
   return {
     ...base,
-    // Eval owns its own collection; never touch the app's.
     collectionName: env.EVAL_COLLECTION ?? "eval_corpus",
     judgeEndpoint: env.JUDGE_ENDPOINT ?? base.vllmEndpoint,
     judgeModel: env.JUDGE_MODEL ?? base.llmModel,
+    judgeApiKey: env.JUDGE_API_KEY ?? env.VLLM_API_KEY ?? "EMPTY",
   };
 }
 
@@ -308,7 +312,11 @@ async function main(): Promise<void> {
   console.log("[eval] Ingesting corpus…");
   await ingestCorpus(rag, corpus);
 
-  const judge = makeJudge({ endpoint: cfg.judgeEndpoint, model: cfg.judgeModel });
+  const judge = makeJudge({
+    endpoint: cfg.judgeEndpoint,
+    model: cfg.judgeModel,
+    apiKey: cfg.judgeApiKey,
+  });
   const judgeSameAsLlm = cfg.judgeEndpoint === cfg.vllmEndpoint && cfg.judgeModel === cfg.llmModel;
   if (judgeSameAsLlm) {
     console.warn(
