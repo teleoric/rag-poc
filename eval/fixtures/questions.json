@@ -1,0 +1,124 @@
+{
+  "questions": [
+    {
+      "id": "A-01",
+      "tenantId": "tenant-acme-legal",
+      "question": "How is per-tenant rate limiting enforced on the API gateway?",
+      "expected_sources": ["arch-doc-v2"],
+      "expected_behavior": "answer",
+      "expected_substrings": ["100", "Redis"]
+    },
+    {
+      "id": "A-02",
+      "tenantId": "tenant-acme-legal",
+      "question": "What HTTP status code does the gateway return when rate limits are exceeded, and how should clients react?",
+      "expected_sources": ["arch-doc-v2"],
+      "expected_behavior": "answer",
+      "expected_substrings": ["429", "Retry-After"]
+    },
+    {
+      "id": "A-03",
+      "tenantId": "tenant-acme-legal",
+      "question": "How does the database enforce tenant data isolation?",
+      "expected_sources": ["db-security-spec"],
+      "expected_behavior": "answer",
+      "expected_substrings": ["row-level security", "RLS", "tenant_id"]
+    },
+    {
+      "id": "A-04",
+      "tenantId": "tenant-acme-legal",
+      "question": "What is the canary deployment strategy and what triggers an automatic rollback?",
+      "expected_sources": ["deployment-runbook"],
+      "expected_behavior": "answer",
+      "expected_substrings": ["canary", "5%"]
+    },
+    {
+      "id": "A-05",
+      "tenantId": "tenant-acme-legal",
+      "question": "What is the platform-wide availability SLO and how is it measured?",
+      "expected_sources": ["monitoring-spec"],
+      "expected_behavior": "answer",
+      "expected_substrings": ["99.9%"]
+    },
+    {
+      "id": "B-01",
+      "tenantId": "tenant-globex-accounting",
+      "question": "What revenue recognition framework is used and how is SaaS revenue recognized?",
+      "expected_sources": ["asc606-policy"],
+      "expected_behavior": "answer",
+      "expected_substrings": ["ASC 606", "ratably"]
+    },
+    {
+      "id": "B-02",
+      "tenantId": "tenant-globex-accounting",
+      "question": "When must quarterly reconciliations be signed off and what threshold triggers controller review?",
+      "expected_sources": ["close-procedures"],
+      "expected_behavior": "answer",
+      "expected_substrings": ["T+3", "$50K"]
+    },
+    {
+      "id": "B-03",
+      "tenantId": "tenant-globex-accounting",
+      "question": "What is the segregation of duties threshold for journal entries under SOX?",
+      "expected_sources": ["audit-controls"],
+      "expected_behavior": "answer",
+      "expected_substrings": ["$10K"]
+    },
+    {
+      "id": "B-04",
+      "tenantId": "tenant-globex-accounting",
+      "question": "What is the counterparty risk cap per correspondent bank and where is excess cash invested?",
+      "expected_sources": ["treasury-policy"],
+      "expected_behavior": "answer",
+      "expected_substrings": ["$250M", "Treasuries"]
+    },
+    {
+      "id": "B-05",
+      "tenantId": "tenant-globex-accounting",
+      "question": "What review process applies to vendors with access to customer PII?",
+      "expected_sources": ["vendor-management"],
+      "expected_behavior": "answer",
+      "expected_substrings": ["SOC 2"]
+    },
+    {
+      "id": "X-01",
+      "tenantId": "tenant-globex-accounting",
+      "question": "How does the database enforce tenant data isolation?",
+      "expected_sources": [],
+      "expected_behavior": "no_context",
+      "_note": "Cross-tenant probe: A-03's question asked of the wrong tenant. The RLS chunk belongs to tenant-acme-legal."
+    },
+    {
+      "id": "X-02",
+      "tenantId": "tenant-acme-legal",
+      "question": "What revenue recognition framework is used for SaaS subscriptions?",
+      "expected_sources": [],
+      "expected_behavior": "no_context",
+      "_note": "Cross-tenant probe: B-01's question asked of the wrong tenant."
+    },
+    {
+      "id": "X-03",
+      "tenantId": "tenant-acme-legal",
+      "question": "What is the segregation of duties threshold for journal entries?",
+      "expected_sources": [],
+      "expected_behavior": "no_context",
+      "_note": "Cross-tenant probe: B-03's question asked of the wrong tenant."
+    },
+    {
+      "id": "U-01",
+      "tenantId": "tenant-acme-legal",
+      "question": "What is the company's parental leave policy?",
+      "expected_sources": [],
+      "expected_behavior": "no_context",
+      "_note": "In-tenant but unanswerable: no HR docs in the corpus."
+    },
+    {
+      "id": "U-02",
+      "tenantId": "tenant-globex-accounting",
+      "question": "What kubernetes ingress controller does the platform use?",
+      "expected_sources": [],
+      "expected_behavior": "no_context",
+      "_note": "In-tenant but unanswerable: tenant-globex has no infra docs."
+    }
+  ]
+}

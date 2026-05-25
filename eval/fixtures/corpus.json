@@ -1,0 +1,69 @@
+{
+  "tenants": [
+    {
+      "tenantId": "tenant-acme-legal",
+      "description": "Enterprise SaaS platform: API, infrastructure, security",
+      "documents": [
+        {
+          "source": "arch-doc-v2",
+          "pageNumber": 4,
+          "text": "The new API Gateway handles rate limiting via Redis, enforcing a 100 req/sec limit per tenant. Burst capacity is set to 150 with a 60-second refill window. Requests exceeding the burst return HTTP 429 with a Retry-After header indicating the seconds until the next available slot. The gateway also handles request authentication by validating signed JWTs against a per-tenant public key registry stored in Vault."
+        },
+        {
+          "source": "db-security-spec",
+          "pageNumber": 12,
+          "sectionRef": "3.2.1",
+          "text": "Tenant isolation in the database is handled via row-level security (RLS) policies in PostgreSQL. Every tenant-scoped table includes a tenant_id column, and an RLS policy restricts visibility to rows whose tenant_id matches the current session's app.tenant_id setting. The session variable is set by the connection pool middleware after JWT validation. Direct connections that bypass the middleware are blocked at the network layer."
+        },
+        {
+          "source": "deployment-runbook",
+          "pageNumber": 2,
+          "text": "Production deployments use Argo CD with a canary strategy. New revisions roll out to 5% of pods first, soak for 15 minutes while error rates and p99 latency are monitored against the previous revision, then promote in 25% increments every 10 minutes. Rollback is triggered automatically if either the error rate exceeds 1% or p99 latency increases by more than 30%."
+        },
+        {
+          "source": "monitoring-spec",
+          "pageNumber": 6,
+          "text": "Each service publishes RED metrics (Rate, Errors, Duration) to Prometheus on a 15-second scrape interval. SLOs are defined per service in service.yaml and enforced via Grafana alerts feeding PagerDuty. The platform-level SLO is 99.9% availability per quarter, measured as the ratio of successful requests to total requests excluding 4xx client errors."
+        },
+        {
+          "source": "incident-response",
+          "pageNumber": 1,
+          "text": "Severity-1 incidents (full platform outage or data integrity breach) page the on-call engineer immediately via PagerDuty and open a #incident-NNN Slack channel. The Incident Commander is the on-call engineer until handed off. Customer Communications is published every 30 minutes during active SEV-1. Post-incident review is mandatory within 5 business days for any SEV-1 or SEV-2 incident."
+        }
+      ]
+    },
+    {
+      "tenantId": "tenant-globex-accounting",
+      "description": "Financial services: revenue recognition, accounting policy, audit controls",
+      "documents": [
+        {
+          "source": "asc606-policy",
+          "pageNumber": 1,
+          "sectionRef": "1.0",
+          "text": "Revenue recognition follows the ASC 606 five-step model: (1) identify the contract with a customer, (2) identify the performance obligations in the contract, (3) determine the transaction price, (4) allocate the transaction price to the performance obligations, (5) recognize revenue when (or as) the entity satisfies a performance obligation. Performance obligations are accounted for at the contract level. SaaS subscriptions are recognized ratably over the subscription term."
+        },
+        {
+          "source": "close-procedures",
+          "pageNumber": 7,
+          "text": "Quarterly close procedures require reconciliation sign-off within T+3 business days. The controller reviews all balance sheet reconciliations greater than $50K variance from prior quarter. Sub-ledger to general ledger ties must be completed by T+2; intercompany eliminations by T+3; consolidation entries by T+4. The CFO certification memo is filed with the audit committee within 10 business days of period close."
+        },
+        {
+          "source": "audit-controls",
+          "pageNumber": 5,
+          "sectionRef": "SOX-302",
+          "text": "Under SOX Section 302, the CEO and CFO must certify quarterly that the financial statements fairly present the company's financial condition. Internal controls over financial reporting (ICFR) testing follows COSO 2013 framework. Segregation of duties requires that no individual can both initiate and approve a journal entry above $10K. ITGCs are tested annually by internal audit and externally by the registered public accounting firm."
+        },
+        {
+          "source": "treasury-policy",
+          "pageNumber": 3,
+          "text": "Operating cash is held in two primary correspondent banks with each balance capped at $250M to manage counterparty risk. Excess cash above operating needs is swept daily into a treasury sweep account holding short-duration US Treasuries with maturity under 90 days. FX hedging policy requires that more than 50% of forecast foreign currency revenue for the next four quarters be hedged via forward contracts."
+        },
+        {
+          "source": "vendor-management",
+          "pageNumber": 2,
+          "text": "All new vendors with annual spend exceeding $25K require completion of the vendor risk assessment questionnaire, financial viability review, and security review for any vendor with access to customer data. Procurement contracts above $100K require legal review. Vendors with access to PII or financial systems must complete an annual SOC 2 Type II review. Payment terms default to Net 30 unless otherwise negotiated."
+        }
+      ]
+    }
+  ]
+}

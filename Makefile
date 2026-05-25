@@ -6,7 +6,7 @@ SHELL := /bin/bash
 LLM_MODEL ?= meta-llama/Llama-3.1-8B-Instruct
 QDRANT_CONTAINER ?= qdrant-poc
 
-.PHONY: help install typecheck smoke smoke-tiny smoke-llama bench qdrant qdrant-stop vllm rag clean
+.PHONY: help install typecheck smoke smoke-tiny smoke-llama bench qdrant qdrant-stop vllm rag eval clean
 
 help:
 	@echo "Targets:"
@@ -20,6 +20,7 @@ help:
 	@echo "  qdrant-stop  stop and remove Qdrant container"
 	@echo "  vllm         vllm serve $(LLM_MODEL) (foreground)"
 	@echo "  rag          run the orchestrator (assumes Qdrant + vLLM up)"
+	@echo "  eval         run the eval harness (assumes Qdrant + vLLM up)"
 
 install:
 	npm install
@@ -58,6 +59,9 @@ vllm:
 
 rag:
 	npm start
+
+eval:
+	npm run eval
 
 clean:
 	rm -rf dist node_modules
