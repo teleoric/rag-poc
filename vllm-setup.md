@@ -1,6 +1,11 @@
-# vLLM 0.19.0 on ROCm 7.2 — RDNA3 (gfx1100) Setup Guide
+# vLLM 0.21.0 on ROCm 7.2 — RDNA3 (gfx1100) Setup Guide
 
-> Tested with vLLM v0.19.0, ROCm 7.2, Ubuntu, Radeon RX 7900 XT (gfx1100)
+> Tested with vLLM v0.21.0, ROCm 7.2.2, Ubuntu, Radeon RX 7900 XT (gfx1100).
+>
+> v0.21.0 vs the previous v0.19.0 procedure: requires **C++20** (gcc ≥ 10),
+> **PyTorch ≥ 2.11**, and **HuggingFace `transformers` ≥ 5** — all resolved
+> automatically by the install steps below on Ubuntu 22.04 / 24.04. The RDNA3
+> workarounds (`BUILD_FA=0`, `--enforce-eager`, ROCM_ATTN backend) are unchanged.
 
 ---
 
@@ -15,13 +20,14 @@
 
 - Ubuntu 22.04 or 24.04 LTS
 - Linux kernel 6.10+ recommended for gfx1100 stability
-- ROCm 7.2 installed
-- Python 3.12
+- ROCm 7.2.2 installed (v0.21.0 references 7.2.2 upstream; 7.2.0/.1 may work but isn't tested)
+- Python 3.12 (3.14 also supported by v0.21.0)
+- C++20-capable compiler: gcc ≥ 10 (Ubuntu 22.04 default is gcc-11, 24.04 is gcc-13 — both fine)
 
 ### Verify ROCm 7.2 Installation
 
 ```bash
-cat /opt/rocm/.info/version  # Must show 7.2.x
+cat /opt/rocm/.info/version  # Must show 7.2.x (7.2.2 recommended)
 rocminfo | grep gfx          # Must show gfx1100
 rocm-smi --showproductname   # Must show your GPU
 ls /dev/kfd /dev/dri/render* # Device nodes must exist
@@ -49,14 +55,17 @@ source ~/vllm-env/bin/activate
 
 ## 2. Install PyTorch for ROCm 7.2
 
-ROCm 7.2 requires nightly PyTorch wheels:
+vLLM v0.21.0 requires **PyTorch ≥ 2.11**. ROCm 7.2 still requires nightly
+PyTorch wheels:
 
 ```bash
 pip install --pre torch torchvision torchaudio \
   --index-url https://download.pytorch.org/whl/nightly/rocm6.4
 ```
 
-> ROCm 7.x wheels are published under the `rocm6.4` nightly index as of this writing. If a `rocm7.2` index becomes available, use that instead.
+> The nightly index resolves to torch 2.11+ automatically. ROCm 7.x wheels are
+> still published under the `rocm6.4` index as of this writing; if a `rocm7.2`
+> index becomes available, use that instead.
 
 ### Verify PyTorch ROCm
 
@@ -83,7 +92,7 @@ print('Device name:', torch.cuda.get_device_name(0))
 
 ## 3. Install amdsmi
 
-vLLM 0.19.0 uses `amdsmi` for ROCm platform detection. It ships with ROCm 7.2 but must be installed into the venv:
+vLLM v0.21.0 uses `amdsmi` for ROCm platform detection (same pattern as v0.19.0). It ships with ROCm 7.2 but must be installed into the venv:
 
 ```bash
 cp -r /opt/rocm/share/amd_smi /tmp/amd_smi
@@ -114,17 +123,24 @@ pip install numpy "setuptools>=75.0" setuptools-scm wheel cmake ninja
 pip install huggingface_hub
 ```
 
-> `setuptools>=75.0` is required because vLLM 0.19.0 uses PEP 639 SPDX license strings in `pyproject.toml` that older setuptools versions reject.
+> `setuptools>=75.0` is required because vLLM uses PEP 639 SPDX license strings
+> in `pyproject.toml` that older setuptools versions reject.
+>
+> **C++20 note (v0.21.0):** vLLM v0.21.0 requires a C++20-capable compiler.
+> Verify with `gcc --version` — version ≥ 10 is fine. Ubuntu 22.04 default
+> (gcc-11) and 24.04 default (gcc-13) both satisfy this. If you're on an older
+> distribution, `sudo apt install g++-11` then export `CXX=g++-11` before the
+> build.
 
 ---
 
-## 5. Clone and Build vLLM 0.19.0
+## 5. Clone and Build vLLM 0.21.0
 
 ```bash
 cd ~/projects  # or your preferred directory
 git clone https://github.com/vllm-project/vllm.git
 cd vllm
-git checkout v0.19.0
+git checkout v0.21.0
 ```
 
 ### Set Build Environment Variables
@@ -238,7 +254,7 @@ curl http://localhost:8000/v1/chat/completions \
 
 ## 10. Attention Backend
 
-vLLM 0.19.0 on RDNA3 uses `ROCM_ATTN` by default. To verify:
+vLLM v0.21.0 on RDNA3 uses `ROCM_ATTN` by default (unchanged from v0.19.0 — CK FlashAttention still targets CDNA only). To verify:
 
 ```bash
 vllm serve facebook/opt-125m --dtype float16 --enforce-eager 2>&1 | grep -i "attn\|backend\|attention"
@@ -246,9 +262,9 @@ vllm serve facebook/opt-125m --dtype float16 --enforce-eager 2>&1 | grep -i "att
 
 Expected: `Using ROCM_ATTN backend out of potential backends: ['ROCM_ATTN', 'TRITON_ATTN']`
 
-### vLLM 0.19.0 Environment Variable Notes
+### vLLM Environment Variable Notes (v0.19.0 → v0.21.0)
 
-The following env vars are **not recognized** by vLLM 0.19.0 and will produce warnings:
+The following env vars are **not recognized** by vLLM v0.19.0+ and will produce warnings:
 
 - `VLLM_PLATFORM` — platform detection is handled via `amdsmi`, not env vars
 - `VLLM_USE_TRITON_FLASH_ATTN` — attention backend selection is automatic in the ROCm attention selector
@@ -335,7 +351,7 @@ print(len(amdsmi.amdsmi_get_processor_handles()), 'GPUs')
 amdsmi.amdsmi_shut_down()
 "
 
-# vLLM 0.19.0 platform detection
+# vLLM platform detection
 python -c "
 from vllm.platforms import current_platform
 print('device_type:', repr(current_platform.device_type))
@@ -358,8 +374,9 @@ print('is_rocm:', current_platform.is_rocm())
 | `Cannot update time stamp of directory 'amdsmi.egg-info'` | Building amdsmi from read-only ROCm dir | Copy to `/tmp` first, then `pip install .` |
 | `RuntimeError: operator torchvision::nms does not exist` | torchvision version mismatch | `pip uninstall torchvision -y` and reinstall from same ROCm nightly index |
 | `EngineCore died unexpectedly` on shutdown | Benign race condition in one-shot usage | Ignore — not a real error |
-| `Unknown vLLM environment variable: VLLM_PLATFORM` | Env var not used in v0.19.0 | Remove from environment; detection uses amdsmi |
-| `Unknown vLLM environment variable: VLLM_USE_TRITON_FLASH_ATTN` | Env var not used in v0.19.0 | Remove from environment; backend selection is automatic |
+| `Unknown vLLM environment variable: VLLM_PLATFORM` | Env var not used in v0.19.0+ | Remove from environment; detection uses amdsmi |
+| `Unknown vLLM environment variable: VLLM_USE_TRITON_FLASH_ATTN` | Env var not used in v0.19.0+ | Remove from environment; backend selection is automatic |
+| Build error mentioning `-std=c++20` or `requires C++20` | v0.21.0 needs C++20 compiler | `sudo apt install g++-11` and `export CXX=g++-11` before `pip install -e .` |
 
 ---
 
