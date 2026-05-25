@@ -80,19 +80,53 @@ The 14 / 15 is *not* the system underperforming — it's the eval finding a genu
 
 ## Why this exists
 
-Default reflex: use a managed RAG service (Vertex AI / Gemini Enterprise Agent Platform, AWS Bedrock Knowledge Bases, Azure AI Search + OpenAI). For most workloads, that is the right call.
+Most teams adopting RAG start with the same assumption: pick a managed service (Vertex AI / Gemini Enterprise Agent Platform, AWS Bedrock Knowledge Bases, Azure AI Search + OpenAI) and move on. For many workloads, that is the right call — managed RAG is fast to deploy, well-supported, and lets the team focus on product rather than infrastructure.
 
-This POC exists because there are workloads where it is not — and the question deserves a real answer instead of a default:
+For other workloads, the managed path carries trade-offs that aren't always visible at the decision point. Four in particular show up repeatedly:
 
-| You should consider on-prem RAG when... | Why |
-|---|---|
-| **Customer data cannot leave a controlled environment** | Regulated data (HIPAA, financial, defense, attorney-client, internal HR/legal) often has explicit no-egress requirements |
-| **Inference volume is high and steady** | Per-token API pricing compounds fast at sustained load; amortized GPU + ops is cheaper at scale |
-| **Latency variance matters** | Managed APIs share infrastructure; tail latency drifts with neighbors |
-| **Open-weight model freedom matters** | Fine-tuning, quantizing, or swapping models without vendor permission |
-| **Air-gapped or restricted-network deployment** | This stack runs without internet once model cache is populated |
+- **Data crosses a third-party trust boundary.** Every user query and every retrieved document is sent to the managed provider's environment. For regulated content (HIPAA, financial records, attorney-client privileged), competitively sensitive corpora (internal R&D, contract terms, customer support transcripts containing PII), or anything subject to data-residency requirements, this is a hard story to tell auditors or affected customers — even with strong vendor contracts and zero-retention policies.
+- **Per-token pricing compounds at scale.** Pay-per-API-call is convenient when usage is spiky or low-volume, but the bill grows linearly with inference volume in perpetuity. At enterprise sustained load, amortized GPU + operations cost becomes materially cheaper — typically within months, not years. Without a working on-prem reference, that comparison stays theoretical.
+- **Tail latency depends on other customers.** Managed APIs share infrastructure across every tenant; p99 latency drifts unpredictably with neighbors' load. Latency-critical workflows (anything embedded in an interactive product, or anything driving a downstream SLA) often can't tolerate this variance.
+- **Vendor lock-in is more expensive than it looks.** Knowledge-base schemas, prompt formats, embedding model choices, citation interfaces, and evaluation tooling are proprietary across managed providers. Migrating between Bedrock, Vertex, and Azure RAG offerings is roughly as much work as building on-prem — and a one-way migration *toward* managed (the easy direction) is harder to reverse later than to commit to today.
 
-When *none* of those conditions apply, a managed service is faster to deploy and operate. See [docs/purpose.md](docs/purpose.md) for the full build-vs-buy decision matrix.
+**The purpose of this POC is to make the on-prem alternative evaluable rather than theoretical.** It demonstrates that a complete, production-shape RAG pipeline — ingest, embed, retrieve, generate, cite, and measure — runs on a single commodity AMD GPU, with the enterprise-grade features that typically push teams toward managed services in the first place:
+
+- ✅ **Multi-tenant data isolation** enforced at the storage layer (Qdrant payload filter), not by prompting or by trusting the application layer
+- ✅ **Citation-grade auditability** — every claim in every generated answer maps to a specific source chunk, returned in a structured response
+- ✅ **Independent evaluation harness** — retrieval metrics (Hit@k, MRR@k, Recall@k), LLM-as-judge faithfulness and relevance scoring, and behavioral assertions for tenant isolation and abstention
+- ✅ **Measured behavior, not claimed behavior** — 100% retrieval, 95% faithfulness, 3/3 cross-tenant isolation, idempotent re-ingest (numbers from a measured run, verifiable against an attached eval report)
+- ✅ **Reproducible build** against ROCm 7.2 / vLLM 0.21.0 / Llama-3.1-8B, with battle-tested troubleshooting for the failure modes encountered during validation
+
+**With this POC in hand,** any future RAG decision can be evaluated against real numbers from both paths — managed *and* on-prem — rather than picking the default and discovering trade-offs in production. Specific decisions it unblocks:
+
+1. **Cost modeling.** Comparing amortized hardware + ops cost against managed-API pricing for a specific projected workload — with empirical throughput and latency numbers as inputs.
+2. **Compliance scoping.** Demonstrating to legal / security / audit that a no-egress deployment is technically possible at a given quality bar, before committing scope.
+3. **Use-case triage.** Identifying which corpora and applications belong on-prem vs managed based on sensitivity, volume, latency, and engineering capacity — rather than treating it as one-size-fits-all.
+4. **Foundation for scale-up.** If the answer for a specific workload is "on-prem," this saves roughly 2-3 engineering quarters compared to starting from scratch (full gap analysis in [docs/production-readiness.md](docs/production-readiness.md)).
+
+### Quick decision aid
+
+| Concern | Managed RAG wins | On-prem (this POC) wins |
+|---|---|---|
+| **Time to first demo** | ✅ Afternoon | ❌ Multi-day first-time build |
+| **Data sovereignty / no egress** | ❌ Crosses provider boundary | ✅ Fully local; air-gap-ready |
+| **Sustained-volume cost** | ❌ Linear per-token forever | ✅ Amortized hardware |
+| **Latency consistency (p99)** | ❌ Neighbor-dependent | ✅ Deterministic |
+| **Model freedom** (fine-tune, quantize, swap) | ❌ Vendor catalog only | ✅ Any open-weight model |
+| **New-feature delivery** (advanced retrieval, agentic flows) | ✅ Vendor ships them | ❌ Build them yourself |
+| **Engineering operational burden** | ✅ Vendor manages stack | ❌ Team manages stack |
+| **Spiky / low-volume traffic** | ✅ Pay only for usage | ❌ Hardware idle = sunk cost |
+| **Compliance audit trail** | ❌ Vendor's audits + your contract | ✅ Direct internal control |
+| **Vendor risk / lock-in tolerance** | ❌ Proprietary surfaces | ✅ Open stack, swappable |
+
+No row is universally decisive. The right call depends on the four numbers below — all knowable for any specific workload:
+
+1. **Annual token volume** (input + output) — multiplied by managed-API rates and compared against amortized GPU + ops cost.
+2. **Data sensitivity classification** — does anything in the corpus have an explicit no-egress requirement from legal, compliance, or customers?
+3. **Latency budget at p99** — what's the acceptable tail, and does managed-API neighbor variance fit?
+4. **Engineering capacity** — does the team have anyone who can operate the stack at 11 PM on a Friday when something breaks?
+
+When all four numbers align, the choice is mechanical. When they conflict, this POC exists so the on-prem branch of that decision can be evaluated honestly. The full provider-by-provider comparison (Bedrock vs Vertex vs Azure vs hybrid options) lives in [docs/purpose.md](docs/purpose.md).
 
 ---
 
