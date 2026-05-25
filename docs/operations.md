@@ -7,11 +7,12 @@
 The GPU is single-tenant. Only one of {smoke tests, `vllm serve`, the AWQ benchmark} can hold it at a time. Start the long-running services in order, in separate terminals:
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables':{'primaryColor':'#ffffff','primaryTextColor':'#000000','primaryBorderColor':'#333333','lineColor':'#333333','textColor':'#000000'}}}%%
 flowchart LR
     s1["Terminal 1<br/>make qdrant"] --> s2["Terminal 2<br/>make vllm<br/>(wait for Uvicorn ready)"]
     s2 --> s3["Terminal 3<br/>make rag  OR  make eval"]
 
-    classDef terminal fill:#f0f0f0,stroke:#333,stroke-width:1px
+    classDef terminal fill:#f0f0f0,stroke:#333333,stroke-width:1px,color:#000000
     class s1,s2,s3 terminal
 ```
 

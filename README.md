@@ -18,6 +18,7 @@ A working proof that production-shape Retrieval-Augmented Generation can run **f
 ## What this is
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables':{'primaryColor':'#ffffff','primaryTextColor':'#000000','primaryBorderColor':'#333333','lineColor':'#333333','textColor':'#000000','clusterBkg':'#f7f7f7','clusterBorder':'#666666'}}}%%
 flowchart LR
     subgraph host["On-prem workstation (single 7900 XT)"]
         direction TB
@@ -47,8 +48,8 @@ flowchart LR
 
     query -.->|"eval-time scoring only"| judge
 
-    classDef onprem fill:#e1f5ff,stroke:#0066cc,stroke-width:2px
-    classDef offprem fill:#fff4e1,stroke:#cc6600,stroke-width:2px,stroke-dasharray: 5 5
+    classDef onprem fill:#e1f5ff,stroke:#0066cc,stroke-width:2px,color:#000000
+    classDef offprem fill:#fff4e1,stroke:#cc6600,stroke-width:2px,stroke-dasharray: 5 5,color:#000000
     class host,node,qdrant,gpu,vllm,ingest,query,client onprem
     class external,judge offprem
 ```

@@ -5,6 +5,7 @@
 ## System overview
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables':{'primaryColor':'#ffffff','primaryTextColor':'#000000','primaryBorderColor':'#333333','lineColor':'#333333','textColor':'#000000','clusterBkg':'#f7f7f7','clusterBorder':'#666666'}}}%%
 flowchart LR
     subgraph host["On-prem workstation (single 7900 XT, 24 GB)"]
         direction TB
@@ -44,8 +45,8 @@ flowchart LR
     query -.->|"eval-time only<br/>answer + context"| judge
     judge -.->|"faithfulness + relevance<br/>0-1 scores"| query
 
-    classDef onprem fill:#e1f5ff,stroke:#0066cc,stroke-width:2px
-    classDef offprem fill:#fff4e1,stroke:#cc6600,stroke-width:2px,stroke-dasharray: 5 5
+    classDef onprem fill:#e1f5ff,stroke:#0066cc,stroke-width:2px,color:#000000
+    classDef offprem fill:#fff4e1,stroke:#cc6600,stroke-width:2px,stroke-dasharray: 5 5,color:#000000
     class host,node,qdrant,gpu,vllm,llama,kv,ingest,embed,query,client onprem
     class external,judge offprem
 ```
@@ -67,6 +68,7 @@ The solid arrows are the production query path — **fully local**. Dashed arrow
 ## Ingest flow
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables':{'primaryColor':'#ffffff','primaryTextColor':'#000000','primaryBorderColor':'#333333','lineColor':'#333333','textColor':'#000000','actorBkg':'#ffffff','actorBorder':'#333333','actorTextColor':'#000000','actorLineColor':'#666666','signalColor':'#333333','signalTextColor':'#000000','labelBoxBkgColor':'#fff5d4','labelBoxBorderColor':'#aa8800','labelTextColor':'#000000','loopTextColor':'#000000','noteBkgColor':'#fff5d4','noteBorderColor':'#aa8800','noteTextColor':'#000000','sequenceNumberColor':'#000000'}}}%%
 sequenceDiagram
     autonumber
     participant App as Caller (runPoc or eval)
@@ -99,6 +101,7 @@ Key invariants:
 ## Query flow
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables':{'primaryColor':'#ffffff','primaryTextColor':'#000000','primaryBorderColor':'#333333','lineColor':'#333333','textColor':'#000000','actorBkg':'#ffffff','actorBorder':'#333333','actorTextColor':'#000000','actorLineColor':'#666666','signalColor':'#333333','signalTextColor':'#000000','labelBoxBkgColor':'#fff5d4','labelBoxBorderColor':'#aa8800','labelTextColor':'#000000','loopTextColor':'#000000','noteBkgColor':'#fff5d4','noteBorderColor':'#aa8800','noteTextColor':'#000000','sequenceNumberColor':'#000000'}}}%%
 sequenceDiagram
     autonumber
     participant App as Caller
@@ -133,6 +136,7 @@ Key invariants:
 ## Data flow and trust boundaries
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables':{'primaryColor':'#ffffff','primaryTextColor':'#000000','primaryBorderColor':'#333333','lineColor':'#333333','textColor':'#000000','clusterBkg':'#f7f7f7','clusterBorder':'#666666'}}}%%
 flowchart TB
     subgraph tb1["Trust boundary 1 — on-prem (always)"]
         direction LR
@@ -148,8 +152,8 @@ flowchart TB
     rag -.->|"eval runs only:<br/>retrieved chunks + generated answer"| judge
     judge -.->|"score: 0..1"| rag
 
-    classDef onprem fill:#e1f5ff,stroke:#0066cc,stroke-width:2px
-    classDef offprem fill:#fff4e1,stroke:#cc6600,stroke-width:2px,stroke-dasharray: 5 5
+    classDef onprem fill:#e1f5ff,stroke:#0066cc,stroke-width:2px,color:#000000
+    classDef offprem fill:#fff4e1,stroke:#cc6600,stroke-width:2px,stroke-dasharray: 5 5,color:#000000
     class tb1,user,rag onprem
     class tb2,judge offprem
 ```
@@ -191,12 +195,15 @@ const hits = await store.similaritySearchWithScore(question, this.cfg.topK, {
 What this means at the storage layer:
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables':{'primaryColor':'#ffffff','primaryTextColor':'#000000','primaryBorderColor':'#333333','lineColor':'#333333','textColor':'#000000'}}}%%
 flowchart LR
     q["Query for<br/>tenant=A"] -->|HNSW search| idx["HNSW index<br/>(all vectors,<br/>all tenants)"]
     idx -->|candidate set| filter["Payload filter<br/>metadata.tenantId == A"]
     filter -->|filtered top-k| out["Returned to orchestrator"]
 
-    style filter fill:#ffe1e1,stroke:#cc0000,stroke-width:2px
+    classDef boxes fill:#ffffff,stroke:#333333,stroke-width:1px,color:#000000
+    class q,idx,out boxes
+    style filter fill:#ffe1e1,stroke:#cc0000,stroke-width:2px,color:#000000
 ```
 
 The filter executes inside Qdrant before results return to the orchestrator. The orchestrator never sees a candidate from the wrong tenant. Three failure modes that this design resists:
@@ -235,6 +242,7 @@ This is the chain that breaks when, e.g., a torch update changes the C++ ABI and
 ## Process layout at runtime
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables':{'primaryColor':'#ffffff','primaryTextColor':'#000000','primaryBorderColor':'#333333','lineColor':'#333333','textColor':'#000000','clusterBkg':'#f7f7f7','clusterBorder':'#666666'}}}%%
 flowchart TB
     subgraph term1["Terminal 1: Qdrant"]
         qproc["docker container<br/>qdrant-poc"]
@@ -249,6 +257,9 @@ flowchart TB
 
     oproc -->|"OpenAI-compat HTTP :8000"| vproc
     oproc -->|"REST :6333"| qproc
+
+    classDef proc fill:#ffffff,stroke:#333333,stroke-width:1px,color:#000000
+    class qproc,vproc,gpu1,oproc proc
 ```
 
 The GPU is single-tenant by design: only `vllm serve` holds it. The in-process smoke tests in [scripts/bench/](../scripts/bench/) also acquire the GPU, so they cannot run concurrently with `vllm serve` — see the run order in [operations.md](operations.md).
