@@ -60,12 +60,14 @@ PyTorch wheels:
 
 ```bash
 pip install --pre torch torchvision torchaudio \
-  --index-url https://download.pytorch.org/whl/nightly/rocm6.4
+  --index-url https://download.pytorch.org/whl/nightly/rocm7.2
 ```
 
-> The nightly index resolves to torch 2.11+ automatically. ROCm 7.x wheels are
-> still published under the `rocm6.4` index as of this writing; if a `rocm7.2`
-> index becomes available, use that instead.
+> The nightly `rocm7.2` index is the right target for ROCm 7.2.x hosts. The
+> older `rocm6.4` nightly index will install wheels whose embedded HIP API
+> doesn't match `/opt/rocm` 7.2 — that produces an `undefined symbol:
+> _ZN3c10*` linker error at runtime when vLLM's C++ extensions try to load.
+> See troubleshooting if you previously installed from `rocm6.4`.
 
 ### Verify PyTorch ROCm
 
@@ -151,7 +153,15 @@ export HIP_PATH=/opt/rocm
 export PYTORCH_ROCM_ARCH="gfx1100"
 export BUILD_FA=0          # CK FlashAttention does NOT support RDNA3
 export MAX_JOBS=4          # Limit build parallelism if RAM-constrained
+export CMAKE_ARGS="-DHIP_FOUND=TRUE"   # see note below
 ```
+
+> **`CMAKE_ARGS="-DHIP_FOUND=TRUE"` is required with the `rocm7.2` nightly
+> torch.** Torch's bundled `LoadHIP.cmake` detects HIP correctly and prints
+> every ROCm library version, but it no longer exports the `HIP_FOUND` global
+> variable that vLLM's `CMakeLists.txt` checks. Without this override the
+> build dies with `CMake Error at CMakeLists.txt:151 ... Can't find CUDA or
+> HIP installation` even though HIP is clearly present in the configure log.
 
 ### Build
 
@@ -159,7 +169,29 @@ export MAX_JOBS=4          # Limit build parallelism if RAM-constrained
 pip install --no-build-isolation -e .
 ```
 
-> **`--no-build-isolation` is critical.** Without it, pip creates an isolated build environment that pulls a CUDA torch, causing the build to fail looking for `/opt/rocm/bin/nvcc`.
+> **`--no-build-isolation` is critical.** Without it, pip creates an isolated
+> build environment that pulls a CUDA torch, causing the build to fail looking
+> for `/opt/rocm/bin/nvcc`.
+
+### Verify the C++ extensions actually loaded
+
+The build succeeding is not the same as the runtime extensions loading. Run:
+
+```bash
+python -c "import vllm._C, vllm._rocm_C; print('vllm._C OK')"
+```
+
+This must print `vllm._C OK` with **no preceding ImportError warnings**. If
+you see `undefined symbol: _ZN3c10*`, the compiled `.so` files don't match
+your installed torch — almost always because torch was bumped after vLLM was
+built. Clean and rebuild:
+
+```bash
+cd ~/projects/vllm
+rm -rf build/ .deps/ vllm/_C*.so vllm/_rocm_C*.so vllm.egg-info
+find . -name CMakeCache.txt -delete
+pip install --no-build-isolation -e . --force-reinstall --no-deps
+```
 
 ---
 
@@ -177,6 +209,7 @@ export BUILD_FA=0
 export MAX_JOBS=4
 export TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=1
 export PYTORCH_TUNABLEOP_ENABLED=1
+# CMAKE_ARGS only matters at build time; harmless to leave out of runtime env
 EOF
 ```
 
@@ -199,6 +232,8 @@ huggingface-cli login
 
 ## 8. Smoke Test
 
+### Stage 1 — Tiny model (build sanity)
+
 ```bash
 python -c "
 from vllm import LLM, SamplingParams
@@ -208,13 +243,44 @@ print(out[0].outputs[0].text)
 "
 ```
 
-**Expected log lines confirming ROCm detection:**
+**Expected log lines confirming ROCm detection** (the prefix changed slightly
+in v0.21.0 because of the new TURBOQUANT backend probe):
 
 ```
-Using ROCM_ATTN backend out of potential backends: ['ROCM_ATTN', 'TRITON_ATTN']
+Found incompatible backend(s) [TURBOQUANT] with AttentionType.DECODER.
+Overriding with ROCM_ATTN out of potential backends: ['ROCM_ATTN', 'TRITON_ATTN'].
 ```
 
-> The `EngineCore died unexpectedly` message at shutdown is a known benign race condition in one-shot `LLM.generate()` usage. It does not indicate a real failure.
+> **opt-125m passing is necessary but not sufficient.** Its model code path
+> does not exercise the activation kernels registered by `vllm._C`. If the
+> compiled extensions are stale or ABI-broken, opt-125m can still load and
+> generate via Python fallbacks. Always follow with Stage 2.
+
+### Stage 2 — Llama-architecture model (exercises `_C` kernels)
+
+This is the real validation. Llama uses `SiluAndMul` from `vllm._C`; if the
+extensions didn't load, this fails at model construction with
+`AttributeError: '_OpNamespace' '_C' object has no attribute 'silu_and_mul'`.
+
+```bash
+HF_TOKEN=$HF_TOKEN python -c "
+from vllm import LLM
+llm = LLM(model='meta-llama/Llama-3.1-8B-Instruct',
+          enforce_eager=True, gpu_memory_utilization=0.90, max_model_len=4096)
+print(llm.generate('The architectural difference between').outputs[0].text)
+"
+```
+
+Expect the engine to log `Initializing a V1 LLM engine (v0.21.0)`, load
+weights in ~15-25 s, and produce text. First request also emits three
+`jit_monitor` warnings about Triton kernel JIT compilation — those are
+**normal first-run behavior** (latency spike on request 1 only; subsequent
+requests hit the JIT cache).
+
+> The `EngineCore died unexpectedly` message at shutdown is a known benign
+> race condition in one-shot `LLM.generate()` usage. It does not indicate a
+> real failure. Same applies to
+> `ProcessGroupNCCL.cpp:1554: destroy_process_group() was not called`.
 
 ---
 
@@ -377,6 +443,11 @@ print('is_rocm:', current_platform.is_rocm())
 | `Unknown vLLM environment variable: VLLM_PLATFORM` | Env var not used in v0.19.0+ | Remove from environment; detection uses amdsmi |
 | `Unknown vLLM environment variable: VLLM_USE_TRITON_FLASH_ATTN` | Env var not used in v0.19.0+ | Remove from environment; backend selection is automatic |
 | Build error mentioning `-std=c++20` or `requires C++20` | v0.21.0 needs C++20 compiler | `sudo apt install g++-11` and `export CXX=g++-11` before `pip install -e .` |
+| `CMake Error at CMakeLists.txt:151 ... Can't find CUDA or HIP installation` (configure log clearly shows HIP detected) | rocm7.2 nightly torch's `LoadHIP.cmake` doesn't export the `HIP_FOUND` global vLLM's check relies on | `export CMAKE_ARGS="-DHIP_FOUND=TRUE"` before `pip install --no-build-isolation -e .` |
+| `ImportError: ... vllm/_C.abi3.so: undefined symbol: _ZN3c103hip*` at runtime (often surfacing as `AttributeError: '_OpNamespace' '_C' object has no attribute 'silu_and_mul'` when loading a Llama-architecture model) | The compiled C++ extensions were linked against a different torch ABI than the one currently installed — usually because torch was upgraded after vLLM was built, or vLLM source was bumped without rebuilding `.so` files | Clean and rebuild: `rm -rf build/ .deps/ vllm/_C*.so vllm/_rocm_C*.so vllm.egg-info && find . -name CMakeCache.txt -delete && pip install --no-build-isolation -e . --force-reinstall --no-deps`. Then re-run the §5 _C smoke. |
+| `Failed to import from vllm._C with ImportError` in opt-125m smoke but generation completes anyway | C extensions are broken but opt-125m's code path uses Python fallbacks | Don't trust this as a passing build. Run the Llama smoke (§8 Stage 2) — it will fail with `AttributeError: silu_and_mul`. Fix per the row above. |
+| `Triton kernel JIT compilation during inference` warnings on first request | New v0.21.0 `jit_monitor` informational feature; Triton kernels are JIT-compiled on first shape/config | Harmless. Latency spike on request 1 only; subsequent requests hit the JIT cache. Extend warmup if cold-start latency matters in production. |
+| `Cannot use ROCm custom paged attention kernel, falling back to Triton implementation` | The hand-written HIP paged-attention kernel is CDNA-only; gfx1100 uses the Triton-compiled fallback **inside** ROCM_ATTN | Expected on RDNA3. Not a fallback to a different backend — just a fallback for one kernel within ROCM_ATTN. |
 
 ---
 
