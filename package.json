@@ -34,17 +34,21 @@
   },
   "homepage": "https://github.com/teleoric/rag-poc#readme",
   "dependencies": {
-    "@langchain/community": "^1.1.27",
+    "@huggingface/transformers": "^4.2.0",
     "@langchain/core": "^1.1.39",
     "@langchain/openai": "^1.4.2",
     "@langchain/qdrant": "^1.0.1",
     "@langchain/textsplitters": "^1.0.1",
-    "@xenova/transformers": "^2.17.2",
-    "uuid": "^13.0.0"
+    "uuid": "^13.0.2"
   },
   "devDependencies": {
     "@types/node": "^25.5.2",
     "tsx": "^4.21.0",
     "typescript": "^6.0.2"
+  },
+  "overrides": {
+    "uuid": "^13.0.2",
+    "langsmith": "^0.6.0",
+    "ws": "^8.20.1"
   }
 }

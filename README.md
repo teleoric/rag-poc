@@ -29,10 +29,10 @@ Embeddings (`Xenova/all-MiniLM-L6-v2`) run on CPU via ONNX so the GPU's
    ```
 3. **Node 22+** and **Docker**.
 
-> Building vLLM 0.19.0 against ROCm 7.2 for RDNA3 is non-trivial. The full
-> bare-metal install — including `--no-build-isolation`, `amdsmi`, GEMM
-> tuning, and the RDNA3 limitations — lives in **[vllm-setup.md](vllm-setup.md)**.
-> Follow it once before continuing.
+> Building vLLM v0.21.0 against ROCm 7.2 for RDNA3 is non-trivial. The full
+> bare-metal install — including `--no-build-isolation`, `amdsmi`, the C++20
+> compiler requirement, GEMM tuning, and the RDNA3 limitations — lives in
+> **[vllm-setup.md](vllm-setup.md)**. Follow it once before continuing.
 
 ---
 
