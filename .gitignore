@@ -36,6 +36,9 @@ documents/
 tunableop_results*.csv
 hipblaslt_log*
 
+# Eval harness output (timestamped reports)
+eval/results/
+
 # Local env overrides
 .env.local
 .envrc
